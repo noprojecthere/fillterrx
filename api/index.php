@@ -1,107 +1,59 @@
 <?php
-// Remote playlist URL
-$remoteUrl = 'https://m3u-fetcher.vercel.app/api/airtel';
+// Set headers to output M3U file
+header('Content-Type: audio/x-mpegurl');
+header('Content-Disposition: inline; filename="playlist.m3u"');
 
-// BLOCK rules: jis block ke text ya URL me ye patterns mil jaayen, us block ko hide kar do.
-$blockPatterns = [
-    '/join@Billa_tv/i',                         // sample entry hide
-    '#https?://cdn\.videas\.fr/.*#i',          // demo HLS URL hide
-    // Aap aur patterns add kar sakte ho, e.g. group-title, tvg-logo domain, channel names:
-    // '/group-title="Join"/i',
-    // '/\bZee\s*TV\b/i',
-];
+// Fetch JSON data from URL
+$jsonUrl = "https://ztv.pfy.workers.dev";
+$jsonData = file_get_contents($jsonUrl);
 
-// OPTIONAL allow-list: agar yahan patterns add karoge, to sirf yehi pass honge; empty rakho to sab allowed except blocked.
-$allowOnlyPatterns = [
-    // keep empty for now
-];
-
-// Fetch remote M3U
-function fetch_m3u($url) {
-    $ch = curl_init($url);
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_FOLLOWLOCATION => true,
-        CURLOPT_CONNECTTIMEOUT => 10,
-        CURLOPT_TIMEOUT => 25,
-        CURLOPT_SSL_VERIFYPEER => false,
-        CURLOPT_SSL_VERIFYHOST => false,
-        CURLOPT_USERAGENT => 'Mozilla/5.0 (Vercel-PHP M3U Filter)',
-        CURLOPT_HTTPHEADER => ['Accept: text/plain; charset=UTF-8'],
-    ]);
-    $body = curl_exec($ch);
-    $err  = curl_error($ch);
-    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-
-    if ($body === false || $code < 200 || $code >= 300) {
-        http_response_code(502);
-        header('Content-Type: text/plain; charset=UTF-8');
-        echo "#EXTM3U\n# Error fetching origin: CODE=$code ERR=$err\n";
-        exit;
-    }
-    return $body;
+// Check if data was fetched successfully
+if ($jsonData === false) {
+    die("Error: Unable to fetch JSON data from URL");
 }
 
-// Decide if a block should be dropped
-function should_drop_block(array $blockLines, array $blockPatterns, array $allowOnlyPatterns): bool {
-    $text = implode("\n", $blockLines);
+// Decode JSON data
+$channels = json_decode($jsonData, true);
 
-    if (!empty($allowOnlyPatterns)) {
-        $allowed = false;
-        foreach ($allowOnlyPatterns as $pat) {
-            if (preg_match($pat, $text)) { $allowed = true; break; }
-        }
-        if (!$allowed) return true;
-    }
-
-    foreach ($blockPatterns as $pat) {
-        if (preg_match($pat, $text)) return true;
-    }
-    return false;
+// Check if JSON is valid
+if ($channels === null) {
+    die("Error: Invalid JSON data");
 }
 
-// Parse playlist into channel blocks and filter
-function filter_playlist(string $raw, array $blockPatterns, array $allowOnlyPatterns): string {
-    $lines = preg_split("/\r\n|\r|\n/", $raw);
-    $out = [];
-    $out[] = '#EXTM3U';
+// Start M3U playlist with header
+echo "#EXTM3U\n\n";
 
-    $current = [];
-    $seenHeader = false;
+// Add join message entry
+echo '#EXTINF:-1 movie-type="web" group-title="Join Now" tvg-logo="https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEiamoffBdXQP0r6SHT9kM1ravyBjCVbUrncneORa9h4STgb_d8iEmMyKWn5hbzNnShrdNQYmCMDmbr3xFittRirO_zNiW4ic1FpEwxoVKwxSleDLlTgx9tHmKmKWRwqIyHYWgaUohCyIYKF6TMAutBebcryI8jVyoU4YmeKLPj4dU1gvxmenQ9Lg7MpyOfK/s1280/20250321_130159.png" , join:@streamstartv' . "\n";
+echo "https://t.me/streamstartv\n\n";
 
-    foreach ($lines as $line) {
-        $trim = trim($line);
-        if ($trim === '') continue;
+// Loop through each channel and create M3U entries
+foreach ($channels as $channel) {
+    // Extract fields from JSON
+    $name = $channel['name'] ?? 'Unknown';
+    $logo = $channel['logo'] ?? '';
+    $link = $channel['link'] ?? '';
+    $drmLicense = $channel['drmLicense'] ?? '';
+    $cookie = $channel['cookie'] ?? '';
 
-        // Normalize: skip origin header (we already added our own)
-        if (!$seenHeader && stripos($trim, '#EXTM3U') === 0) {
-            $seenHeader = true;
-            continue;
-        }
-
-        // Collect lines in current block
-        $current[] = $trim;
-
-        // Non-comment line (URL) ends a block
-        if ($trim[0] !== '#') {
-            if (!should_drop_block($current, $blockPatterns, $allowOnlyPatterns)) {
-                foreach ($current as $cl) { $out[] = $cl; }
-            }
-            $current = [];
-        }
+    // Split drmLicense into keyid and key
+    if (!empty($drmLicense)) {
+        $licenseParts = explode(':', $drmLicense);
+        $keyid = $licenseParts[0] ?? '';
+        $key = $licenseParts[1] ?? '';
+    } else {
+        $keyid = '';
+        $key = '';
     }
 
-    // Drop incomplete trailing block (metadata without URL)
-    return implode("\n", $out) . "\n";
+    // Create EXTINF line
+    echo '#EXTINF:-1 group-title="Streamstar" tvg-logo="' . $logo . '" , ' . $name . "\n";
+
+    // Create stream URL with license and cookie parameters
+    if (!empty($keyid) && !empty($key)) {
+        echo $link . '?|LicenseURL=https://vercel-php-clearkey-hex-base64-json.vercel.app/api/results.php?keyid=' . $keyid . '&key=' . $key . '||cookie=' . $cookie . "\n\n";
+    } else {
+        echo $link . "\n\n";
+    }
 }
-
-// Main
-$raw = fetch_m3u($remoteUrl);
-
-// Output as M3U8
-header('Content-Type: application/vnd.apple.mpegurl; charset=UTF-8');
-header('Cache-Control: no-store, must-revalidate');
-header('Pragma: no-cache');
-
-echo filter_playlist($raw, $blockPatterns, $allowOnlyPatterns);
+?>
