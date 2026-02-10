@@ -32,7 +32,7 @@ foreach ($lines as $line) {
         if (count($keys) == 2) {
             $keyid = trim($keys[0]);
             $key = trim($keys[1]);
-            $line = '#KODIPROP:inputstream.adaptive.license_key=' . $keyid . '&key=' . $key;
+            $line = '#KODIPROP:inputstream.adaptive.license_key=https://aqfadtv.xyz/clearkey/results.php?keyid=' . $keyid . '&key=' . $key;
         }
     }
 
