@@ -26,16 +26,16 @@ foreach ($lines as $line) {
         continue; // Skip this line
     }
 
-    // Modify license key format
-    // if (strpos($line, '#KODIPROP:inputstream.adaptive.license_key=') === 0) {
-    //     $key_part = substr($line, strlen('#KODIPROP:inputstream.adaptive.license_key='));
-    //     $keys = explode(':', $key_part);
-    //     if (count($keys) == 2) {
-    //         $keyid = trim($keys[0]);
-    //         $key = trim($keys[1]);
-    //         $line = '#KODIPROP:inputstream.adaptive.license_key=https://aqfadtv.xyz/clearkey/results.php?keyid=' . $keyid . '&key=' . $key;
-    //     }
-    // }
+    Modify license key format
+    if (strpos($line, '#KODIPROP:inputstream.adaptive.license_key=') === 0) {
+        $key_part = substr($line, strlen('#KODIPROP:inputstream.adaptive.license_key='));
+        $keys = explode(':', $key_part);
+        if (count($keys) == 2) {
+            $keyid = trim($keys[0]);
+            $key = trim($keys[1]);
+            $line = '#KODIPROP:inputstream.adaptive.license_key=https://aqfadtv.xyz/clearkey/results.php?keyid=' . $keyid . '&key=' . $key;
+        }
+    }
 
     // Modify URL: Extract cookie and rebuild URL
     if ((strpos($line, 'https://jiotvmblive.cdn.jio.com') === 0 || 
