@@ -1,7 +1,6 @@
 <?php
 // ============================================
-// DEBUG 4 - No file writing needed
-// Works directly in memory
+// DEBUG 5 - PROPER DEX STRING TABLE PARSER
 // ============================================
 
 echo "<pre>\n";
@@ -16,232 +15,182 @@ curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
 curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
 curl_setopt($ch, CURLOPT_TIMEOUT, 60);
 $cs3Data = curl_exec($ch);
-$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 curl_close($ch);
 
-echo "HTTP: $httpCode, Size: " . strlen($cs3Data) . " bytes\n";
-
-if (empty($cs3Data)) {
-    die("Failed to download .cs3!\n");
-}
+echo "Size: " . strlen($cs3Data) . " bytes\n";
 
 // ============================================
-// OPEN ZIP FROM MEMORY (no file needed)
+// EXTRACT classes.dex FROM ZIP IN MEMORY
 // ============================================
 
-// Create temp file in system temp directory
 $tmpFile = tempnam(sys_get_temp_dir(), 'cs3_');
 file_put_contents($tmpFile, $cs3Data);
 
 $zip = new ZipArchive();
-$opened = $zip->open($tmpFile);
+$dexData = null;
 
-if ($opened !== TRUE) {
-    // If temp dir also fails, try memory stream
-    echo "Temp file method: trying alternative...\n";
-    
-    // Parse ZIP manually from memory
-    // ZIP files start with PK (0x504B)
-    if (substr($cs3Data, 0, 2) === "PK") {
-        echo "Valid ZIP detected!\n";
-    }
-    
-    // Find classes.dex in ZIP manually
-    $dexStart = strpos($cs3Data, "dex\n");
-    if ($dexStart === false) {
-        $dexStart = strpos($cs3Data, "dex\x0a");
-    }
-    
-    if ($dexStart !== false) {
-        echo "Found DEX at position: $dexStart\n";
-        $dexData = substr($cs3Data, $dexStart);
-        echo "DEX data size: " . strlen($dexData) . " bytes\n";
-    } else {
-        echo "DEX not found via header search, trying full data...\n";
-        $dexData = $cs3Data;
-    }
-} else {
-    echo "ZIP opened successfully!\n";
-    
-    for ($i = 0; $i < $zip->numFiles; $i++) {
-        echo "  File: " . $zip->getNameIndex($i) . "\n";
-    }
-    
+if ($zip->open($tmpFile) === TRUE) {
     $dexData = $zip->getFromName('classes.dex');
-    if ($dexData === false) {
-        $dexData = $zip->getFromIndex(0);
-    }
     $zip->close();
-    echo "DEX size: " . strlen($dexData) . " bytes\n";
-}
+    echo "DEX size: " . strlen($dexData) . " bytes\n\n";
+} 
 
-// Clean up temp file
-if (isset($tmpFile) && file_exists($tmpFile)) {
-    unlink($tmpFile);
-}
+@unlink($tmpFile);
 
 if (empty($dexData)) {
-    die("Could not extract DEX data!\n");
+    die("Failed to get DEX!\n");
 }
 
 // ============================================
-// EXTRACT ALL STRINGS FROM DEX/ZIP DATA
+// PROPER DEX STRING TABLE PARSER
 // ============================================
 
-echo "\n=== EXTRACTING STRINGS ===\n\n";
+echo "=== PARSING DEX STRING TABLE ===\n\n";
 
+// DEX Header
+$magic = substr($dexData, 0, 8);
+echo "Magic: " . bin2hex(substr($dexData, 0, 4)) . "\n";
+
+// String IDs
+$stringIdsSize = unpack('V', substr($dexData, 0x38, 4))[1];
+$stringIdsOff  = unpack('V', substr($dexData, 0x3C, 4))[1];
+
+echo "String count: $stringIdsSize\n";
+echo "String IDs offset: $stringIdsOff\n\n";
+
+// Read ULEB128
+function readULEB128($data, &$pos) {
+    $result = 0;
+    $shift = 0;
+    do {
+        $b = ord($data[$pos]);
+        $result |= ($b & 0x7F) << $shift;
+        $shift += 7;
+        $pos++;
+    } while ($b & 0x80);
+    return $result;
+}
+
+// Extract ALL strings from DEX string table
 $allStrings = [];
-$currentString = '';
 
-// Search in ENTIRE cs3Data (includes all ZIP content)
-$searchData = $cs3Data;
-
-for ($i = 0; $i < strlen($searchData); $i++) {
-    $c = ord($searchData[$i]);
-    if ($c >= 32 && $c <= 126) {
-        $currentString .= chr($c);
-    } else {
-        if (strlen($currentString) >= 10) {
-            $allStrings[] = $currentString;
-        }
-        $currentString = '';
+for ($i = 0; $i < $stringIdsSize; $i++) {
+    // Read string data offset
+    $dataOff = unpack('V', substr($dexData, $stringIdsOff + ($i * 4), 4))[1];
+    
+    // Read ULEB128 size
+    $pos = $dataOff;
+    $strSize = readULEB128($dexData, $pos);
+    
+    // Read null-terminated MUTF-8 string
+    $str = '';
+    $maxRead = min($strSize * 3, 1000); // safety limit
+    $count = 0;
+    while ($pos < strlen($dexData) && ord($dexData[$pos]) != 0 && $count < $maxRead) {
+        $str .= $dexData[$pos];
+        $pos++;
+        $count++;
     }
+    
+    $allStrings[] = $str;
 }
 
-echo "Total strings found: " . count($allStrings) . "\n\n";
+echo "Total strings extracted: " . count($allStrings) . "\n\n";
 
 // ============================================
-// FIND POTENTIAL KEYS
+// SEARCH FOR KEY/IV RELATED STRINGS
 // ============================================
 
-echo "--- Strings with 'key', 'iv', 'aes', 'crypt', 'sklive' ---\n";
-foreach ($allStrings as $str) {
+echo "=== ALL STRINGS (filtered) ===\n\n";
+
+echo "--- Strings containing 'key', 'iv', 'aes', 'crypt', 'hex', 'sklive' ---\n";
+foreach ($allStrings as $idx => $str) {
     $lower = strtolower($str);
     if (strpos($lower, 'key') !== false || 
         strpos($lower, 'aes') !== false ||
         strpos($lower, 'crypt') !== false ||
-        strpos($lower, 'cipher') !== false ||
         strpos($lower, 'sklive') !== false ||
-        strpos($lower, 'secret') !== false) {
-        echo "  [$str]\n";
+        strpos($lower, 'hex') !== false ||
+        strpos($lower, 'cipher') !== false ||
+        strpos($lower, 'secret') !== false ||
+        strpos($lower, 'iv') !== false) {
+        echo "  [$idx] ($str)\n";
     }
 }
 
-echo "\n--- All 32-char strings ---\n";
-foreach ($allStrings as $str) {
-    if (strlen($str) == 32) {
-        echo "  $str\n";
-    }
-}
-
-echo "\n--- All 36-char strings ---\n";
-foreach ($allStrings as $str) {
-    if (strlen($str) == 36) {
-        echo "  $str\n";
-    }
-}
-
-echo "\n--- All 48-char strings ---\n";
-foreach ($allStrings as $str) {
-    if (strlen($str) == 48) {
-        echo "  $str\n";
-    }
-}
-
-echo "\n--- All 64-char strings ---\n";
-foreach ($allStrings as $str) {
-    if (strlen($str) == 64) {
-        echo "  $str\n";
-    }
-}
-
-echo "\n--- Hex-like strings (30-70 chars, >70% hex) ---\n";
-$hexCandidates = [];
-foreach ($allStrings as $str) {
+echo "\n--- Strings 30-70 chars long ---\n";
+foreach ($allStrings as $idx => $str) {
     $len = strlen($str);
     if ($len >= 30 && $len <= 70) {
         $hexChars = 0;
         for ($j = 0; $j < $len; $j++) {
             if (ctype_xdigit($str[$j])) $hexChars++;
         }
-        $hexPercent = ($hexChars / $len) * 100;
-        if ($hexPercent > 70) {
-            echo "  [$len chars, " . round($hexPercent) . "% hex] $str\n";
-            $hexCandidates[] = $str;
-        }
+        $pct = round(($hexChars / $len) * 100);
+        echo "  [$idx] ($len chars, $pct% hex) $str\n";
+    }
+}
+
+echo "\n--- Strings exactly 32 chars ---\n";
+foreach ($allStrings as $idx => $str) {
+    if (strlen($str) == 32) {
+        echo "  [$idx] $str\n";
+    }
+}
+
+echo "\n--- Strings exactly 36 chars ---\n";
+foreach ($allStrings as $idx => $str) {
+    if (strlen($str) == 36) {
+        echo "  [$idx] $str\n";
+    }
+}
+
+echo "\n--- Strings exactly 48 chars ---\n";
+foreach ($allStrings as $idx => $str) {
+    if (strlen($str) == 48) {
+        echo "  [$idx] $str\n";
+    }
+}
+
+echo "\n--- Strings exactly 64 chars ---\n";
+foreach ($allStrings as $idx => $str) {
+    if (strlen($str) == 64) {
+        echo "  [$idx] $str\n";
+    }
+}
+
+echo "\n--- ALL strings 16+ chars (potential keys) ---\n";
+foreach ($allStrings as $idx => $str) {
+    $len = strlen($str);
+    if ($len >= 16 && $len <= 100) {
+        // Skip obvious non-key strings
+        if (strpos($str, ' ') !== false && strpos($str, '.') !== false) continue;
+        if (strpos($str, 'http') === 0) continue;
+        if (strpos($str, 'com.') === 0) continue;
+        if (strpos($str, 'java') === 0) continue;
+        if (strpos($str, 'kotlin') === 0) continue;
+        if (strpos($str, 'android') === 0) continue;
+        if (strpos($str, 'org.') === 0) continue;
+        if (strpos($str, 'javax') === 0) continue;
+        
+        echo "  [$idx] ($len) $str\n";
+    }
+}
+
+echo "\n--- FULL STRING DUMP (all " . count($allStrings) . " strings) ---\n";
+foreach ($allStrings as $idx => $str) {
+    if (strlen($str) > 0 && strlen($str) < 200) {
+        echo "  [$idx] $str\n";
     }
 }
 
 // ============================================
-// ALSO SEARCH hexStringToByteArray ARGUMENTS
+// NOW TRY EVERY 32+ CHAR STRING AS KEY
 // ============================================
 
-echo "\n--- Strings near 'hexStringToByteArray' ---\n";
-$searchFor = 'hexStringToByteArray';
-$pos = 0;
-while (($pos = strpos($searchData, $searchFor, $pos)) !== false) {
-    echo "  Found at position: $pos\n";
-    
-    // Get 200 bytes after
-    $after = substr($searchData, $pos, 300);
-    $printable = '';
-    $strings = [];
-    $current = '';
-    for ($j = 0; $j < strlen($after); $j++) {
-        $c = ord($after[$j]);
-        if ($c >= 32 && $c <= 126) {
-            $current .= chr($c);
-        } else {
-            if (strlen($current) > 3) {
-                $strings[] = $current;
-            }
-            $current = '';
-        }
-    }
-    if (strlen($current) > 3) $strings[] = $current;
-    
-    echo "  Nearby strings:\n";
-    foreach ($strings as $s) {
-        echo "    ? $s\n";
-    }
-    echo "\n";
-    $pos++;
-}
+echo "\n\n=== BRUTE FORCE DECRYPTION ===\n\n";
 
-// ============================================
-// SEARCH FOR SPECIFIC KNOWN PATTERNS
-// ============================================
-
-echo "\n--- Searching for known KEY pattern ---\n";
-$knownKey = "6c326S2GUzu2eRTTGAXmFcfGis1RK3YsU6K1";
-$knownIV = "70314b356e50377542386848316c3139";
-
-$keyPos = strpos($searchData, $knownKey);
-$ivPos = strpos($searchData, $knownIV);
-
-echo "Known KEY found at: " . ($keyPos !== false ? $keyPos : "NOT FOUND") . "\n";
-echo "Known IV found at: " . ($ivPos !== false ? $ivPos : "NOT FOUND") . "\n";
-
-if ($keyPos !== false) {
-    // Show raw bytes around key
-    $start = max(0, $keyPos - 50);
-    $rawBytes = substr($searchData, $start, 200);
-    echo "Raw hex around KEY: " . bin2hex($rawBytes) . "\n";
-}
-
-if ($ivPos !== false) {
-    $start = max(0, $ivPos - 50);
-    $rawBytes = substr($searchData, $start, 200);
-    echo "Raw hex around IV: " . bin2hex($rawBytes) . "\n";
-}
-
-// ============================================
-// NOW TRY ALL CANDIDATES
-// ============================================
-
-echo "\n=== TRYING DECRYPTION ===\n\n";
-
-// Fetch encrypted events
+// Fetch encrypted data
 $ch2 = curl_init();
 curl_setopt($ch2, CURLOPT_URL, "https://sufyanpromax.space/events.txt");
 curl_setopt($ch2, CURLOPT_RETURNTRANSFER, true);
@@ -252,9 +201,7 @@ curl_setopt($ch2, CURLOPT_TIMEOUT, 30);
 $encData = trim(curl_exec($ch2));
 curl_close($ch2);
 
-echo "Encrypted data: " . strlen($encData) . " bytes\n";
-
-// Custom Base64 decode
+// Decrypt steps
 $LOOKUP = "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f" .
           "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f" .
           " !\"#\$%&'()*+,-./" .
@@ -274,70 +221,81 @@ $decoded = base64_decode($stdB64);
 $reversed = strrev($decoded);
 $ciphertext = base64_decode($reversed);
 
-echo "Ciphertext: " . strlen($ciphertext) . " bytes\n";
-echo "Block aligned: " . (strlen($ciphertext) % 16 == 0 ? "YES" : "NO") . "\n\n";
+echo "Ciphertext: " . strlen($ciphertext) . " bytes, aligned: " . 
+     (strlen($ciphertext) % 16 == 0 ? "YES" : "NO") . "\n\n";
 
-// IV - try both hex-decoded and raw
-$ivHex = "70314b356e50377542386848316c3139";
-$iv1 = hex2bin($ivHex);  // 16 bytes
-$iv2 = substr($ivHex, 0, 16);  // first 16 chars as raw
+// Collect all potential keys from strings
+$potentialKeys = [];
 
-// Collect ALL potential keys to try
-$keysToTry = [];
-
-// Add hex candidates
-foreach ($hexCandidates as $hc) {
-    $keysToTry["hexcandidate_raw_$hc"] = $hc;
-    if (strlen($hc) == 32 && ctype_xdigit($hc)) {
-        $keysToTry["hexcandidate_decoded_$hc"] = hex2bin($hc);
-    }
-}
-
-// Add all 32-char strings
 foreach ($allStrings as $str) {
-    if (strlen($str) == 32) {
-        $keysToTry["str32_raw_$str"] = $str;
-        if (ctype_xdigit($str)) {
-            $keysToTry["str32_hex_$str"] = hex2bin($str);
+    $len = strlen($str);
+    if ($len >= 16 && $len <= 64) {
+        $potentialKeys["raw_$str"] = $str;
+        
+        // If valid hex, also try decoded
+        if (ctype_xdigit($str) && $len % 2 == 0) {
+            $potentialKeys["hexdec_$str"] = hex2bin($str);
         }
     }
 }
 
-// Add java-style key
-$javaKey = '';
-$keyStr = "6c326S2GUzu2eRTTGAXmFcfGis1RK3YsU6K1";
-for ($i = 0; $i < strlen($keyStr) - 1; $i += 2) {
-    $h = ctype_xdigit($keyStr[$i]) ? hexdec($keyStr[$i]) : -1;
-    $l = ctype_xdigit($keyStr[$i+1]) ? hexdec($keyStr[$i+1]) : -1;
-    $javaKey .= chr((($h << 4) + $l) & 0xFF);
+// Also try the Java-style hex decode for every string
+foreach ($allStrings as $str) {
+    $len = strlen($str);
+    if ($len >= 30 && $len <= 64 && $len % 2 == 0) {
+        $javaDecoded = '';
+        for ($i = 0; $i < $len - 1; $i += 2) {
+            $h = ctype_xdigit($str[$i]) ? hexdec($str[$i]) : -1;
+            $l = ctype_xdigit($str[$i+1]) ? hexdec($str[$i+1]) : -1;
+            $javaDecoded .= chr((($h << 4) + $l) & 0xFF);
+        }
+        $potentialKeys["javahex_$str"] = $javaDecoded;
+    }
 }
-$keysToTry["java_style_18"] = $javaKey;
-$keysToTry["java_trim16"] = substr($javaKey, 0, 16);
-$keysToTry["java_pad32"] = str_pad($javaKey, 32, "\0");
 
-// Direct key string variations
-$keysToTry["direct_16"] = substr($keyStr, 0, 16);
-$keysToTry["direct_32"] = substr(str_pad($keyStr, 32, "\0"), 0, 32);
+echo "Potential keys to try: " . count($potentialKeys) . "\n\n";
 
-echo "Total keys to try: " . count($keysToTry) . "\n\n";
+// Try ALL potential IVs too
+$potentialIVs = [];
+foreach ($allStrings as $str) {
+    if (strlen($str) == 32 && ctype_xdigit($str)) {
+        $potentialIVs["hexdec_$str"] = hex2bin($str);
+    }
+    if (strlen($str) == 16) {
+        $potentialIVs["raw16_$str"] = $str;
+    }
+    if (strlen($str) >= 32) {
+        // Java-style decode to 16 bytes
+        $len = strlen($str);
+        if ($len >= 32) {
+            $sub = substr($str, 0, 32);
+            if (ctype_xdigit($sub)) {
+                $potentialIVs["sub32hex_$str"] = hex2bin($sub);
+            }
+        }
+    }
+}
 
-$ciphers = ['aes-128-cbc', 'aes-192-cbc', 'aes-256-cbc'];
-$ivs = ['hex_decoded' => $iv1, 'raw_16' => $iv2];
+// Add known IV variations
+$potentialIVs["known_hex"] = hex2bin("7031udZrQVKAfFo4jAhXoaAJNM6Trsrpxso9");
+$potentialIVs["known_raw16"] = substr("7031udZrQVKAfFo4jAhXoaAJNM6Trsrpxso9", 0, 16);
+
+echo "Potential IVs to try: " . count($potentialIVs) . "\n\n";
+
 $found = false;
+$tried = 0;
 
-foreach ($keysToTry as $keyName => $key) {
-    foreach ($ciphers as $cipher) {
-        $reqLen = match($cipher) {
-            'aes-128-cbc' => 16,
-            'aes-192-cbc' => 24,
-            'aes-256-cbc' => 32,
-        };
-        
+foreach ($potentialKeys as $keyName => $key) {
+    foreach (['aes-128-cbc', 'aes-256-cbc'] as $cipher) {
+        $reqLen = ($cipher === 'aes-128-cbc') ? 16 : 32;
         $adjKey = substr(str_pad($key, $reqLen, "\0"), 0, $reqLen);
         
-        foreach ($ivs as $ivName => $iv) {
+        foreach ($potentialIVs as $ivName => $iv) {
+            if (strlen($iv) !== 16) continue;
+            
+            $tried++;
             $result = @openssl_decrypt(
-                $ciphertext, $cipher, $adjKey, 
+                $ciphertext, $cipher, $adjKey,
                 OPENSSL_RAW_DATA, $iv
             );
             
@@ -345,16 +303,18 @@ foreach ($keysToTry as $keyName => $key) {
                 $t = trim($result);
                 $fc = substr($t, 0, 1);
                 if ($fc === '[' || $fc === '{') {
-                    echo "?????????????????????????????\n";
-                    echo "?? SUCCESS!\n";
-                    echo "Key: $keyName\n";
-                    echo "Cipher: $cipher\n";
-                    echo "IV: $ivName\n";
+                    echo "???????????????????????????????????????\n";
+                    echo "?????? SUCCESS! ??????\n";
+                    echo "Key name: $keyName\n";
                     echo "Key hex: " . bin2hex($adjKey) . "\n";
+                    echo "Key len: " . strlen($adjKey) . "\n";
+                    echo "IV name: $ivName\n";
                     echo "IV hex: " . bin2hex($iv) . "\n";
-                    echo "Result (300 chars):\n";
-                    echo substr($t, 0, 300) . "\n";
-                    echo "?????????????????????????????\n";
+                    echo "Cipher: $cipher\n";
+                    echo "Tried: $tried combinations\n";
+                    echo "\nFirst 500 chars:\n";
+                    echo substr($t, 0, 500) . "\n";
+                    echo "???????????????????????????????????????\n";
                     $found = true;
                     break 3;
                 }
@@ -364,11 +324,7 @@ foreach ($keysToTry as $keyName => $key) {
 }
 
 if (!$found) {
-    echo "? No working combination found!\n";
-    echo "\nOpenSSL errors:\n";
-    while ($msg = openssl_error_string()) {
-        echo "  $msg\n";
-    }
+    echo "? Tried $tried combinations - none worked!\n";
 }
 
 echo "\n</pre>";
