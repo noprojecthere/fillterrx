@@ -4,8 +4,9 @@ header('Content-Type: audio/x-mpegurl');
 header('Content-Disposition: inline; filename="jpvali_playlist.m3u"');
 
 // M3U file URL
-$m3u_url = 'https://raw.githubusercontent.com/alex8875/m3u/refs/heads/main/jtv.m3u';
-//
+$m3u_url = 'https://livetv-cb7.pages.dev/hotstar';
+
+//https://raw.githubusercontent.com/alex8875/m3u/refs/heads/main/jtv.m3u
 // Fetch the M3U content
 $content = @file_get_contents($m3u_url);
 
