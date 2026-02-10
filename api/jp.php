@@ -26,6 +26,11 @@ foreach ($lines as $line) {
         continue; // Skip this line
     }
 
+    //# =======
+    if (strpos($line, '# ======= CATEGORY:') === 0) {
+        continue; // Skip this line
+    }
+
     Modify license key format
     if (strpos($line, '#KODIPROP:inputstream.adaptive.license_key=') === 0) {
         $key_part = substr($line, strlen('#KODIPROP:inputstream.adaptive.license_key='));
@@ -38,22 +43,22 @@ foreach ($lines as $line) {
     }
 
     // Modify URL: Extract cookie and rebuild URL
-    // if ((strpos($line, 'https://jiotvmblive.cdn.jio.com') === 0 || 
-    //      strpos($line, 'https://jiotvpllive.cdn.jio.com') === 0) && 
-    //     strpos($line, 'index.mpd?') !== false) {
+    if ((strpos($line, 'https://jiotvmblive.cdn.jio.com') === 0 || 
+         strpos($line, 'https://jiotvpllive.cdn.jio.com') === 0) && 
+        strpos($line, 'index.mpd?') !== false) {
 
-    //     // Extract the cookie value from __hdnea__ parameter
-    //     if (preg_match('/__hdnea__=([^&]+)/', $line, $matches)) {
-    //         $cookie_value = $matches[1];
+        // Extract the cookie value from __hdnea__ parameter
+        if (preg_match('/__hdnea__=([^&]+)/', $line, $matches)) {
+            $cookie_value = $matches[1];
             
-    //         // Get base URL (everything before the ?)
-    //         $url_parts = explode('?', $line);
-    //         $base_url = $url_parts[0];
+            // Get base URL (everything before the ?)
+            $url_parts = explode('?', $line);
+            $base_url = $url_parts[0];
             
-    //         // Rebuild URL with ||cookie= format
-    //         $line = $base_url . '?||cookie=__hdnea__=' . $cookie_value;
-    //     }
-    // }
+            // Rebuild URL with ||cookie= format
+            $line = $base_url . '?||cookie=__hdnea__=' . $cookie_value;
+        }
+    }
 
     $modified_lines[] = $line;
 }
