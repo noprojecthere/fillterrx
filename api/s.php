@@ -1,331 +1,362 @@
 <?php
 // ============================================
-// DEBUG 5 - PROPER DEX STRING TABLE PARSER
+// SKTECH LIVE - M3U PLAYLIST GENERATOR
+// Auto-extracts key from .cs3 file
 // ============================================
 
-echo "<pre>\n";
-echo "=== DOWNLOADING .cs3 FILE ===\n";
-
-$cs3Url = "https://raw.githubusercontent.com/NivinCNC/CNCVerse-Cloud-Stream-Extension/builds/SKTechProvider.cs3";
-
-$ch = curl_init();
-curl_setopt($ch, CURLOPT_URL, $cs3Url);
-curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-curl_setopt($ch, CURLOPT_TIMEOUT, 60);
-$cs3Data = curl_exec($ch);
-curl_close($ch);
-
-echo "Size: " . strlen($cs3Data) . " bytes\n";
-
 // ============================================
-// EXTRACT classes.dex FROM ZIP IN MEMORY
+// STEP 1: EXTRACT KEY & IV FROM .cs3
 // ============================================
 
-$tmpFile = tempnam(sys_get_temp_dir(), 'cs3_');
-file_put_contents($tmpFile, $cs3Data);
-
-$zip = new ZipArchive();
-$dexData = null;
-
-if ($zip->open($tmpFile) === TRUE) {
-    $dexData = $zip->getFromName('classes.dex');
-    $zip->close();
-    echo "DEX size: " . strlen($dexData) . " bytes\n\n";
-} 
-
-@unlink($tmpFile);
-
-if (empty($dexData)) {
-    die("Failed to get DEX!\n");
+function extractKeysFromCS3() {
+    $cs3Url = "https://raw.githubusercontent.com/NivinCNC/CNCVerse-Cloud-Stream-Extension/builds/SKTechProvider.cs3";
+    
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $cs3Url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 60);
+    $cs3Data = curl_exec($ch);
+    curl_close($ch);
+    
+    if (empty($cs3Data)) return null;
+    
+    // Extract DEX from ZIP
+    $tmpFile = tempnam(sys_get_temp_dir(), 'cs3_');
+    file_put_contents($tmpFile, $cs3Data);
+    
+    $zip = new ZipArchive();
+    $dexData = null;
+    if ($zip->open($tmpFile) === TRUE) {
+        $dexData = $zip->getFromName('classes.dex');
+        $zip->close();
+    }
+    @unlink($tmpFile);
+    
+    if (empty($dexData)) return null;
+    
+    // Parse DEX string table
+    $stringIdsSize = unpack('V', substr($dexData, 0x38, 4))[1];
+    $stringIdsOff = unpack('V', substr($dexData, 0x3C, 4))[1];
+    
+    $allStrings = [];
+    for ($i = 0; $i < $stringIdsSize; $i++) {
+        $dataOff = unpack('V', substr($dexData, $stringIdsOff + ($i * 4), 4))[1];
+        $pos = $dataOff;
+        
+        // Read ULEB128
+        $strSize = 0;
+        $shift = 0;
+        do {
+            $b = ord($dexData[$pos]);
+            $strSize |= ($b & 0x7F) << $shift;
+            $shift += 7;
+            $pos++;
+        } while ($b & 0x80);
+        
+        // Read string
+        $str = '';
+        $count = 0;
+        while ($pos < strlen($dexData) && ord($dexData[$pos]) != 0 && $count < 1000) {
+            $str .= $dexData[$pos];
+            $pos++;
+            $count++;
+        }
+        $allStrings[] = $str;
+    }
+    
+    // Find KEY and IV: 32-char hex strings
+    $hexStrings32 = [];
+    foreach ($allStrings as $idx => $str) {
+        if (strlen($str) == 32 && ctype_xdigit($str)) {
+            $hexStrings32[] = ['idx' => $idx, 'str' => $str];
+        }
+    }
+    
+    // KEY and IV are usually adjacent 32-char hex strings
+    // Find them near AES_KEY/AES_IV labels
+    $keyStr = null;
+    $ivStr = null;
+    
+    if (count($hexStrings32) >= 2) {
+        // First two 32-char hex strings are KEY and IV
+        $keyStr = $hexStrings32[0]['str'];
+        $ivStr = $hexStrings32[1]['str'];
+    }
+    
+    if (!$keyStr || !$ivStr) return null;
+    
+    return [
+        'key' => hex2bin($keyStr),
+        'iv' => hex2bin($ivStr)
+    ];
 }
 
 // ============================================
-// PROPER DEX STRING TABLE PARSER
+// STEP 2: LOOKUP TABLE & DECRYPTION
 // ============================================
 
-echo "=== PARSING DEX STRING TABLE ===\n\n";
+$LOOKUP_TABLE_D = "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f" .
+                  "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f" .
+                  " !\"#\$%&'()*+,-./" .
+                  "0123456789:;<=>?" .
+                  "@EGMNKABUVCDYHLI" .
+                  "FPOZQSRWTXJ[\\]^_" .
+                  "`egmnkabuvcdyhli" .
+                  "fpozqsrwtxj{|}~\x7f";
 
-// DEX Header
-$magic = substr($dexData, 0, 8);
-echo "Magic: " . bin2hex(substr($dexData, 0, 4)) . "\n";
-
-// String IDs
-$stringIdsSize = unpack('V', substr($dexData, 0x38, 4))[1];
-$stringIdsOff  = unpack('V', substr($dexData, 0x3C, 4))[1];
-
-echo "String count: $stringIdsSize\n";
-echo "String IDs offset: $stringIdsOff\n\n";
-
-// Read ULEB128
-function readULEB128($data, &$pos) {
-    $result = 0;
-    $shift = 0;
-    do {
-        $b = ord($data[$pos]);
-        $result |= ($b & 0x7F) << $shift;
-        $shift += 7;
-        $pos++;
-    } while ($b & 0x80);
+function customToStandardBase64($customB64) {
+    global $LOOKUP_TABLE_D;
+    $result = '';
+    $len = strlen($customB64);
+    for ($i = 0; $i < $len; $i++) {
+        $ascii = ord($customB64[$i]);
+        if ($ascii < strlen($LOOKUP_TABLE_D)) {
+            $result .= $LOOKUP_TABLE_D[$ascii];
+        } else {
+            $result .= $customB64[$i];
+        }
+    }
     return $result;
 }
 
-// Extract ALL strings from DEX string table
-$allStrings = [];
-
-for ($i = 0; $i < $stringIdsSize; $i++) {
-    // Read string data offset
-    $dataOff = unpack('V', substr($dexData, $stringIdsOff + ($i * 4), 4))[1];
+function decryptSKLive($encryptedData, $key, $iv) {
+    // Step 1: Custom Base64 → Standard Base64
+    $standardB64 = customToStandardBase64($encryptedData);
     
-    // Read ULEB128 size
-    $pos = $dataOff;
-    $strSize = readULEB128($dexData, $pos);
+    // Step 2: Base64 decode
+    $decoded = base64_decode($standardB64);
+    if ($decoded === false) return null;
     
-    // Read null-terminated MUTF-8 string
-    $str = '';
-    $maxRead = min($strSize * 3, 1000); // safety limit
-    $count = 0;
-    while ($pos < strlen($dexData) && ord($dexData[$pos]) != 0 && $count < $maxRead) {
-        $str .= $dexData[$pos];
-        $pos++;
-        $count++;
+    // Step 3: REVERSE
+    $reversed = strrev($decoded);
+    
+    // Step 4: Base64 decode again
+    $ciphertext = base64_decode($reversed);
+    if ($ciphertext === false) return null;
+    
+    // Step 5: Check alignment
+    if (strlen($ciphertext) % 16 !== 0) return null;
+    
+    // Step 6: AES-128-CBC decrypt
+    $decrypted = openssl_decrypt(
+        $ciphertext,
+        'aes-128-cbc',
+        $key,
+        OPENSSL_RAW_DATA,
+        $iv
+    );
+    
+    return $decrypted ?: null;
+}
+
+function fetchAndDecrypt($url, $key, $iv) {
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_USERAGENT,
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+    $response = curl_exec($ch);
+    curl_close($ch);
+    
+    if (empty($response)) return null;
+    return decryptSKLive(trim($response), $key, $iv);
+}
+
+// ============================================
+// STEP 3: MAIN - GENERATE M3U
+// ============================================
+
+// Extract keys
+$keys = extractKeysFromCS3();
+if (!$keys) {
+    die("Failed to extract keys from .cs3 file!");
+}
+
+$AES_KEY = $keys['key'];
+$AES_IV = $keys['iv'];
+
+// Check what to generate
+$mode = $_GET['mode'] ?? 'events'; // events, channels, all
+
+if ($mode === 'events' || $mode === 'all') {
+    // Fetch and decrypt events
+    $eventsUrl = "https://sufyanpromax.space/events.txt";
+    $decryptedEvents = fetchAndDecrypt($eventsUrl, $AES_KEY, $AES_IV);
+    
+    if (!$decryptedEvents) {
+        die("Failed to decrypt events!");
     }
     
-    $allStrings[] = $str;
-}
-
-echo "Total strings extracted: " . count($allStrings) . "\n\n";
-
-// ============================================
-// SEARCH FOR KEY/IV RELATED STRINGS
-// ============================================
-
-echo "=== ALL STRINGS (filtered) ===\n\n";
-
-echo "--- Strings containing 'key', 'iv', 'aes', 'crypt', 'hex', 'sklive' ---\n";
-foreach ($allStrings as $idx => $str) {
-    $lower = strtolower($str);
-    if (strpos($lower, 'key') !== false || 
-        strpos($lower, 'aes') !== false ||
-        strpos($lower, 'crypt') !== false ||
-        strpos($lower, 'sklive') !== false ||
-        strpos($lower, 'hex') !== false ||
-        strpos($lower, 'cipher') !== false ||
-        strpos($lower, 'secret') !== false ||
-        strpos($lower, 'iv') !== false) {
-        echo "  [$idx] ($str)\n";
+    $eventWrappers = json_decode($decryptedEvents, true);
+    if (!$eventWrappers) {
+        die("Failed to parse events JSON!");
     }
-}
-
-echo "\n--- Strings 30-70 chars long ---\n";
-foreach ($allStrings as $idx => $str) {
-    $len = strlen($str);
-    if ($len >= 30 && $len <= 70) {
-        $hexChars = 0;
-        for ($j = 0; $j < $len; $j++) {
-            if (ctype_xdigit($str[$j])) $hexChars++;
-        }
-        $pct = round(($hexChars / $len) * 100);
-        echo "  [$idx] ($len chars, $pct% hex) $str\n";
-    }
-}
-
-echo "\n--- Strings exactly 32 chars ---\n";
-foreach ($allStrings as $idx => $str) {
-    if (strlen($str) == 32) {
-        echo "  [$idx] $str\n";
-    }
-}
-
-echo "\n--- Strings exactly 36 chars ---\n";
-foreach ($allStrings as $idx => $str) {
-    if (strlen($str) == 36) {
-        echo "  [$idx] $str\n";
-    }
-}
-
-echo "\n--- Strings exactly 48 chars ---\n";
-foreach ($allStrings as $idx => $str) {
-    if (strlen($str) == 48) {
-        echo "  [$idx] $str\n";
-    }
-}
-
-echo "\n--- Strings exactly 64 chars ---\n";
-foreach ($allStrings as $idx => $str) {
-    if (strlen($str) == 64) {
-        echo "  [$idx] $str\n";
-    }
-}
-
-echo "\n--- ALL strings 16+ chars (potential keys) ---\n";
-foreach ($allStrings as $idx => $str) {
-    $len = strlen($str);
-    if ($len >= 16 && $len <= 100) {
-        // Skip obvious non-key strings
-        if (strpos($str, ' ') !== false && strpos($str, '.') !== false) continue;
-        if (strpos($str, 'http') === 0) continue;
-        if (strpos($str, 'com.') === 0) continue;
-        if (strpos($str, 'java') === 0) continue;
-        if (strpos($str, 'kotlin') === 0) continue;
-        if (strpos($str, 'android') === 0) continue;
-        if (strpos($str, 'org.') === 0) continue;
-        if (strpos($str, 'javax') === 0) continue;
+    
+    // Output M3U
+    header('Content-Type: audio/mpegurl; charset=utf-8');
+    header('Content-Disposition: inline; filename="sktech_live.m3u"');
+    header('Access-Control-Allow-Origin: *');
+    
+    echo "#EXTM3U\n\n";
+    
+    foreach ($eventWrappers as $wrapper) {
+        $eventJson = $wrapper['event'] ?? null;
+        if (!$eventJson) continue;
         
-        echo "  [$idx] ($len) $str\n";
-    }
-}
-
-echo "\n--- FULL STRING DUMP (all " . count($allStrings) . " strings) ---\n";
-foreach ($allStrings as $idx => $str) {
-    if (strlen($str) > 0 && strlen($str) < 200) {
-        echo "  [$idx] $str\n";
-    }
-}
-
-// ============================================
-// NOW TRY EVERY 32+ CHAR STRING AS KEY
-// ============================================
-
-echo "\n\n=== BRUTE FORCE DECRYPTION ===\n\n";
-
-// Fetch encrypted data
-$ch2 = curl_init();
-curl_setopt($ch2, CURLOPT_URL, "https://sufyanpromax.space/events.txt");
-curl_setopt($ch2, CURLOPT_RETURNTRANSFER, true);
-curl_setopt($ch2, CURLOPT_USERAGENT, 
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
-curl_setopt($ch2, CURLOPT_SSL_VERIFYPEER, false);
-curl_setopt($ch2, CURLOPT_TIMEOUT, 30);
-$encData = trim(curl_exec($ch2));
-curl_close($ch2);
-
-// Decrypt steps
-$LOOKUP = "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f" .
-          "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f" .
-          " !\"#\$%&'()*+,-./" .
-          "0123456789:;<=>?" .
-          "@EGMNKABUVCDYHLI" .
-          "FPOZQSRWTXJ[\\]^_" .
-          "`egmnkabuvcdyhli" .
-          "fpozqsrwtxj{|}~\x7f";
-
-$stdB64 = '';
-for ($i = 0; $i < strlen($encData); $i++) {
-    $a = ord($encData[$i]);
-    $stdB64 .= ($a < strlen($LOOKUP)) ? $LOOKUP[$a] : $encData[$i];
-}
-
-$decoded = base64_decode($stdB64);
-$reversed = strrev($decoded);
-$ciphertext = base64_decode($reversed);
-
-echo "Ciphertext: " . strlen($ciphertext) . " bytes, aligned: " . 
-     (strlen($ciphertext) % 16 == 0 ? "YES" : "NO") . "\n\n";
-
-// Collect all potential keys from strings
-$potentialKeys = [];
-
-foreach ($allStrings as $str) {
-    $len = strlen($str);
-    if ($len >= 16 && $len <= 64) {
-        $potentialKeys["raw_$str"] = $str;
+        $event = json_decode($eventJson, true);
+        if (!$event) continue;
         
-        // If valid hex, also try decoded
-        if (ctype_xdigit($str) && $len % 2 == 0) {
-            $potentialKeys["hexdec_$str"] = hex2bin($str);
-        }
-    }
-}
-
-// Also try the Java-style hex decode for every string
-foreach ($allStrings as $str) {
-    $len = strlen($str);
-    if ($len >= 30 && $len <= 64 && $len % 2 == 0) {
-        $javaDecoded = '';
-        for ($i = 0; $i < $len - 1; $i += 2) {
-            $h = ctype_xdigit($str[$i]) ? hexdec($str[$i]) : -1;
-            $l = ctype_xdigit($str[$i+1]) ? hexdec($str[$i+1]) : -1;
-            $javaDecoded .= chr((($h << 4) + $l) & 0xFF);
-        }
-        $potentialKeys["javahex_$str"] = $javaDecoded;
-    }
-}
-
-echo "Potential keys to try: " . count($potentialKeys) . "\n\n";
-
-// Try ALL potential IVs too
-$potentialIVs = [];
-foreach ($allStrings as $str) {
-    if (strlen($str) == 32 && ctype_xdigit($str)) {
-        $potentialIVs["hexdec_$str"] = hex2bin($str);
-    }
-    if (strlen($str) == 16) {
-        $potentialIVs["raw16_$str"] = $str;
-    }
-    if (strlen($str) >= 32) {
-        // Java-style decode to 16 bytes
-        $len = strlen($str);
-        if ($len >= 32) {
-            $sub = substr($str, 0, 32);
-            if (ctype_xdigit($sub)) {
-                $potentialIVs["sub32hex_$str"] = hex2bin($sub);
-            }
-        }
-    }
-}
-
-// Add known IV variations
-$potentialIVs["known_hex"] = hex2bin("7031udZrQVKAfFo4jAhXoaAJNM6Trsrpxso9");
-$potentialIVs["known_raw16"] = substr("7031udZrQVKAfFo4jAhXoaAJNM6Trsrpxso9", 0, 16);
-
-echo "Potential IVs to try: " . count($potentialIVs) . "\n\n";
-
-$found = false;
-$tried = 0;
-
-foreach ($potentialKeys as $keyName => $key) {
-    foreach (['aes-128-cbc', 'aes-256-cbc'] as $cipher) {
-        $reqLen = ($cipher === 'aes-128-cbc') ? 16 : 32;
-        $adjKey = substr(str_pad($key, $reqLen, "\0"), 0, $reqLen);
+        // Skip invisible
+        if (isset($event['visible']) && !$event['visible']) continue;
         
-        foreach ($potentialIVs as $ivName => $iv) {
-            if (strlen($iv) !== 16) continue;
+        $eventName = $event['eventName'] ?? 'Unknown';
+        $teamA = $event['teamAName'] ?? '';
+        $teamB = $event['teamBName'] ?? '';
+        $category = $event['category'] ?? 'Other';
+        $logo = $event['eventLogo'] ?? '';
+        $links = $event['links'] ?? '';
+        $date = $event['date'] ?? '';
+        $time = $event['time'] ?? '';
+        
+        // Display name
+        if (!empty($teamA) && !empty($teamB) && $teamA !== $teamB) {
+            $displayName = "$teamA vs $teamB";
+        } else if (!empty($teamA)) {
+            $displayName = $teamA;
+        } else {
+            $displayName = $eventName;
+        }
+        
+        // Get slug
+        $slug = pathinfo($links, PATHINFO_FILENAME);
+        if (empty($slug)) continue;
+        
+        // Fetch streams
+        $streamUrl = "https://sufyanpromax.space/{$slug}.txt";
+        $decryptedStreams = fetchAndDecrypt($streamUrl, $AES_KEY, $AES_IV);
+        
+        if (!$decryptedStreams) continue;
+        
+        $streams = json_decode($decryptedStreams, true);
+        if (!$streams || !is_array($streams)) continue;
+        
+        $serverNum = 1;
+        foreach ($streams as $stream) {
+            $serverName = $stream['name'] ?? "Server $serverNum";
+            $link = $stream['link'] ?? '';
             
-            $tried++;
-            $result = @openssl_decrypt(
-                $ciphertext, $cipher, $adjKey,
-                OPENSSL_RAW_DATA, $iv
-            );
-            
-            if ($result !== false && strlen($result) > 10) {
-                $t = trim($result);
-                $fc = substr($t, 0, 1);
-                if ($fc === '[' || $fc === '{') {
-                    echo "???????????????????????????????????????\n";
-                    echo "?????? SUCCESS! ??????\n";
-                    echo "Key name: $keyName\n";
-                    echo "Key hex: " . bin2hex($adjKey) . "\n";
-                    echo "Key len: " . strlen($adjKey) . "\n";
-                    echo "IV name: $ivName\n";
-                    echo "IV hex: " . bin2hex($iv) . "\n";
-                    echo "Cipher: $cipher\n";
-                    echo "Tried: $tried combinations\n";
-                    echo "\nFirst 500 chars:\n";
-                    echo substr($t, 0, 500) . "\n";
-                    echo "???????????????????????????????????????\n";
-                    $found = true;
-                    break 3;
+            // Try tokenApi if no direct link
+            if (empty($link) && !empty($stream['tokenApi'])) {
+                $tokenConfig = json_decode($stream['tokenApi'], true);
+                if ($tokenConfig && !empty($tokenConfig['api'])) {
+                    $ch = curl_init();
+                    curl_setopt($ch, CURLOPT_URL, $tokenConfig['api']);
+                    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                    curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+                    curl_setopt($ch, CURLOPT_USERAGENT,
+                        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+                    $tokenResponse = curl_exec($ch);
+                    curl_close($ch);
+                    
+                    if ($tokenResponse && !empty($tokenConfig['link_key'])) {
+                        $tokenJson = json_decode($tokenResponse, true);
+                        if ($tokenJson) {
+                            $link = $tokenJson[$tokenConfig['link_key']] ?? '';
+                        }
+                    }
+                    if (empty($link) && $tokenResponse) {
+                        $link = trim($tokenResponse);
+                    }
                 }
             }
+            
+            if (empty($link)) {
+                $serverNum++;
+                continue;
+            }
+            
+            // Parse headers from link (url|header1=val1&header2=val2)
+            $parts = explode('|', $link, 2);
+            $url = $parts[0];
+            
+            $category = trim($category);
+            
+            echo "#EXTINF:-1 tvg-logo=\"{$logo}\" group-title=\"{$category}\",{$displayName} - {$serverName}\n";
+            
+            // Add VLC options for headers
+            if (isset($parts[1])) {
+                $headerPairs = explode('&', $parts[1]);
+                foreach ($headerPairs as $pair) {
+                    $kv = explode('=', $pair, 2);
+                    if (count($kv) == 2) {
+                        $hName = strtolower(trim($kv[0]));
+                        $hVal = trim($kv[1]);
+                        if ($hName === 'user-agent') {
+                            echo "#EXTVLCOPT:http-user-agent={$hVal}\n";
+                        } elseif ($hName === 'referer' || $hName === 'referrer') {
+                            echo "#EXTVLCOPT:http-referrer={$hVal}\n";
+                        } elseif ($hName === 'origin') {
+                            echo "#EXTVLCOPT:http-origin={$hVal}\n";
+                        }
+                    }
+                }
+            }
+            
+            // DRM info comment
+            if (!empty($stream['api']) && strpos($url, '.mpd') !== false) {
+                echo "#KODIPROP:inputstream.adaptive.license_key={$stream['api']}\n";
+            }
+            
+            echo "{$url}\n\n";
+            $serverNum++;
+        }
+    }
+    
+    echo "# Generated: " . date('Y-m-d H:i:s') . "\n";
+    echo "# Events: " . count($eventWrappers) . "\n";
+}
+
+// ============================================
+// CHANNELS MODE (IPTV Categories)
+// ============================================
+if ($mode === 'channels' || $mode === 'all') {
+    $catUrl = "https://sufyanpromax.space/categories.txt";
+    $decryptedCats = fetchAndDecrypt($catUrl, $AES_KEY, $AES_IV);
+    
+    if ($decryptedCats) {
+        $catWrappers = json_decode($decryptedCats, true);
+        if ($catWrappers) {
+            if ($mode === 'channels') {
+                header('Content-Type: audio/mpegurl; charset=utf-8');
+                echo "#EXTM3U\n\n";
+            }
+            
+            echo "\n# === IPTV CATEGORIES ===\n\n";
+            
+            foreach ($catWrappers as $wrapper) {
+                $catJson = $wrapper['cat'] ?? null;
+                if (!$catJson) continue;
+                
+                $cat = json_decode($catJson, true);
+                if (!$cat) continue;
+                if (isset($cat['visible']) && !$cat['visible']) continue;
+                
+                $catName = $cat['name'] ?? 'Unknown';
+                $catApi = $cat['api'] ?? '';
+                $catLogo = $cat['logo'] ?? '';
+                
+                if (empty($catApi)) continue;
+                
+                echo "# Category: {$catName}\n";
+                echo "#EXTINF:-1 tvg-logo=\"{$catLogo}\" group-title=\"IPTV\",{$catName}\n";
+                echo "{$catApi}\n\n";
+            }
         }
     }
 }
-
-if (!$found) {
-    echo "? Tried $tried combinations - none worked!\n";
-}
-
-echo "\n</pre>";
 ?>
