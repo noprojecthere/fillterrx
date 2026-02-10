@@ -21,15 +21,22 @@ $modified_lines = [];
 foreach ($lines as $line) {
     $line = trim($line);
 
+    //# =======
+    if (strpos($line, '#') === 0) {
+        continue; // Skip this line
+    }
+    
+    //# =======
+    if (strpos($line, '# ======= CATEGORY:') === 0) {
+        continue; // Skip this line
+    }
+
     // REMOVE: #EXTHTTP lines completely
     if (strpos($line, '#EXTHTTP:') === 0) {
         continue; // Skip this line
     }
 
-    //# =======
-    if (strpos($line, '# ======= CATEGORY:') === 0) {
-        continue; // Skip this line
-    }
+    
 
     Modify license key format
     if (strpos($line, '#KODIPROP:inputstream.adaptive.license_key=') === 0) {
