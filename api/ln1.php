@@ -1,6 +1,6 @@
 <?php
 header('Content-Type: application/x-mpegURL');
-header('Cache-Control: s-maxage=600, stale-while-revalidate=120');
+header('Cache-Control: s-maxage=1800, stale-while-revalidate=300');
 
 
 function fetchExternalM3U($url) {
