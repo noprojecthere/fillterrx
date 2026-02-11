@@ -1,6 +1,6 @@
 <?php
 header('Content-Type: text/plain; charset=UTF-8');
-header('Cache-Control: s-maxage=1800, stale-while-revalidate=600');
+header('Cache-Control: s-maxage=3600, stale-while-revalidate=900');
 
 // Source M3U URL
 $sourceUrl = 'https://raw.githubusercontent.com/amit-654584/jtv/refs/heads/main/jtv.m3u';
