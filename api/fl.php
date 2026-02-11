@@ -1,7 +1,7 @@
 <?php
 header('Content-Type: audio/x-mpegurl');
 header('Content-Disposition: attachment; filename="flvali_playlist.m3u"');
-header('Cache-Control: s-maxage=300, stale-while-revalidate=60');
+header('Cache-Control: s-maxage=1200, stale-while-revalidate=180');
 
 // JSON URL se data fetch karna
 $jsonUrl = 'https://sliv-fc.pfy.workers.dev';
