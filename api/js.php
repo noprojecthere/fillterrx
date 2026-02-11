@@ -2,7 +2,7 @@
 // Set headers for M3U playlist
 header('Content-Type: audio/x-mpegurl');
 header('Content-Disposition: inline; filename="jstarvali_playlist.m3u"');
-header('Cache-Control: s-maxage=1800, stale-while-revalidate=600');
+header('Cache-Control: s-maxage=3600, stale-while-revalidate=900');
 
 // M3U file URL
 $m3u_url = 'https://livetv-cb7.pages.dev/hotstar';
