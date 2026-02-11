@@ -1,8 +1,6 @@
 <?php
 header('Content-Type: application/x-mpegURL');
-header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
-header('Pragma: no-cache');
-header('Expires: Thu, 01 Jan 1970 00:00:00 GMT');
+header('Cache-Control: s-maxage=600, stale-while-revalidate=120');
 
 
 function fetchExternalM3U($url) {
