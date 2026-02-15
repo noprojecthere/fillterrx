@@ -77,11 +77,6 @@ $liveEvents = [
  
 
 
-
-PRIME HINDI 
-|drmScheme=clearkey&drmLicense=:
-
-
 echo "#EXTM3U\n\n";
 
 
