@@ -30,19 +30,37 @@ $liveEvents = [
     [
         'title' => 'HINDI',
         'logo' => 'g',
-        'url' => 'https://livetv-push.hotstar.com/dash/live/2002466/sshindiwv/master.mpd?||cookie=hdntl=exp=1768658389~acl=*sshindi*~id=bcf094aea9a3582d2656ffa3136e916f~data=hdntl~hmac=07b3719JZy4p5AaUyqbeXAc86Avu6oQJx4xc81a2eb289ced52026761b1b616c4|||http-origin=https://www.hotstar.com|||http-referer=https://www.hotstar.com/||http-user-agent=Hotstar;in.startv.hotstar/25.02.24.8.11169%20(Android/15)',
+        'url' => 'https://jcevents.hotstar.com/bpk-tv/f0e3e64ae415771d8e460317ce97aa5e/Fallback/index.m3u8?||cookie=hdnea=exp=1771226699~acl=%2f*~id=42423f41220471e1d21c1e8b565c4e9c~data=hdntl~hmac=c1c47eb6dc2d91d81b7ffd2dfaaec0a9a6175341dc3fd307c94098f655c003b4|||http-origin=https://www.hotstar.com|||http-referer=https://www.hotstar.com/||http-user-agent=Hotstar;in.startv.hotstar/25.02.24.8.11169%20(Android/15)',
         'props' => [
             '#KODIPROP:inputstream.adaptive.license_type=clearkey',
-            '#KODIPROP:inputstream.adaptive.license_key=https://vercel-php-clearkey-hex-base64-json.vercel.app/api/results.php?keyid=fe7718fbb3fb4ba78c07cc0f578744e6&key=624e24b1843b459fab0a949609416f0d'
+            '#KODIPROP:inputstream.adaptive.license_key=https://aqfadtv.xyz/clearkey/results.php?keyid=fe7718fbb3fb4ba78c07cc0f578744e6&key=624e24b1843b459fab0a949609416f0d'
         ]
     ],
     [
-        'title' => 'English',
+        'title' => 'PRIME HINDI',
         'logo' => 'g',
-        'url' => 'https://otte.live.fly.ww.aiv-cdn.net/iad-nitro/live/clients/dash/enc/jufvexhaqf/out/v1/b218966eb1c84d6fba6dc68f47154e3c/cenc.mpd?',
+        'url' => 'https://ta.bia-cf.live.pv-cdn.net/syd-nitro/live/clients/dash/enc/utvv87801b/out/v1/d9a29796c1c3468785dbee1776ffd354/cenc.mpd?',
         'props' => [
             '#KODIPROP:inputstream.adaptive.license_type=clearkey',
-            '#KODIPROP:inputstream.adaptive.license_key=https://vercel-php-clearkey-hex-base64-json.vercel.app/api/results.php?keyid=1d95f034e5b8b6794a447ef73f83e15d&key=af682ffc1e5e749a5fecbbc7d69ad942'
+            '#KODIPROP:inputstream.adaptive.license_key=https://vercel-php-clearkey-hex-base64-json.vercel.app/api/results.php?keyid=531zGng3g8GY8382QcW8kmWNZtLyFH1WHb7&key=f5a77d391847790f46059cbb092d575b'
+        ]
+    ],
+    [
+        'title' => 'PRIME ENGLISH',
+        'logo' => 'g',
+        'url' => 'https://ta.bia-cf.live.pv-cdn.net/bom-nitro/live/clients/dash/enc/1pasle3psa/out/v1/d25c047441ed467595c8085109e0d73f/cenc.mpd?',
+        'props' => [
+            '#KODIPROP:inputstream.adaptive.license_type=clearkey',
+            '#KODIPROP:inputstream.adaptive.license_key=https://vercel-php-clearkey-hex-base64-json.vercel.app/api/results.php?keyid=e2135pbYhaAC4uzcTSn9C16bqeZDG6X3xuG3&key=2671d5rMERSxaN5uLj1onK6S5LqbHGzihEA6'
+        ]
+    ],
+    [
+        'title' => 'WILLOW',
+        'logo' => 'g',
+        'url' => 'https://otte.live.fly.ww.aiv-cdn.net/syd-nitro/live/dash/enc/utvv87801b/out/v1/d9a29796c1c3468785dbee1776ffd354/cenc.mpd?',
+        'props' => [
+            '#KODIPROP:inputstream.adaptive.license_type=clearkey',
+            '#KODIPROP:inputstream.adaptive.license_key=https://vercel-php-clearkey-hex-base64-json.vercel.app/api/results.php?keyid=531zGng3g8GY8382QcW8kmWNZtLyFH1WHb7&key=f5a77d391847790f46059cbb092d575b'
         ]
     ],
     [
@@ -56,7 +74,12 @@ $liveEvents = [
     ]
 ];
 
+ 
 
+
+
+PRIME HINDI 
+|drmScheme=clearkey&drmLicense=:
 
 
 echo "#EXTM3U\n\n";
