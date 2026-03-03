@@ -24,7 +24,7 @@ if ($m3uContent === false) {
 }
 
 // New user agent
-$newUserAgent = 'plaYtv/7.1.3 (Linux;Android 13) ygx/824.1 ExoPlayerLib/824.0';
+$newUserAgent = 'billatvoriginals';
 
 // License key URL template
 $licenseKeyUrlTemplate = 'https://aqfadtv.xyz/clearkey/results.php?keyid={KEYID}&key={KEY}';
